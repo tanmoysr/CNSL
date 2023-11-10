@@ -75,4 +75,4 @@ Look at the [plotting](./plotting) folder for the plotting of different stages.
 ![Training_All](./saved_models/train_log_github2stackTest__LT2IC102023-11-10%2016-04-45.png)
 
 [plotting_all.py](./plotting/plotting_inference.py) will show the progress of inference:
-![Inference](./saved_models/Inference_log_github2stackTest__LT2IC102023-11-10 18-39-14.png)
+![Inference](./saved_models/Inference_log_github2stackTest__LT2IC102023-11-10%2018-39-14.png)
