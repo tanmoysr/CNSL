@@ -74,5 +74,5 @@ Look at the [plotting](./plotting) folder for the plotting of different stages.
 [plotting_all.py](./plotting/plotting_all.py) will show the final training of the whole framework:
 ![Training_All](./saved_models/train_log_github2stackTest__LT2IC102023-11-10%2016-04-45.png)
 
-[plotting_all.py](./plotting/plotting_inference.py) will show the progress of inference:
+[plotting_inference.py](./plotting/plotting_inference.py) will show the progress of inference:
 ![Inference](./saved_models/Inference_log_github2stackTest__LT2IC102023-11-10%2018-39-14.png)
