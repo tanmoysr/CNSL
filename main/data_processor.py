@@ -331,8 +331,7 @@ def git_static_features_gen():
         for line in lines:
             line = line.strip().split(" ")
             repo_gid_graph[line[0]] = line[1]
-    # token = input("Enter your API key: ")
-    token = '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'
+    token = input("Enter your API key: ")
     static_features = {}
     repo_count = 0
     extract_tic = time.perf_counter()
