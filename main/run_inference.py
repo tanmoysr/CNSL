@@ -291,7 +291,7 @@ for epoch in range(args.numEpochInfer):
         infected_predicted_rec = y_hat_rec.squeeze().cpu().detach().numpy().flatten()
         auc_all_rec += roc_auc_score(infected_original_rec, infected_predicted_rec)
 
-    args.seed_threshold = utils.find_bestThreshold(seed_original, seed_hat)
+
     epoch_toc = time.perf_counter()
     epoch_time = epoch_toc - epoch_tic
     epoch_dict['loss'].append(loss_overall / (batch_idx + 1))
