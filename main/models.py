@@ -79,7 +79,6 @@ class Encoder(nn.Module):
         log_var = self.FC_var(h_)
         return mean, log_var
 
-
 class Decoder(nn.Module):
     def __init__(self, input_dim, latent_dim, hidden_dim, output_dim, seed_pred = False, seed_plus = False):
         super(Decoder, self).__init__()
@@ -111,7 +110,6 @@ class Decoder(nn.Module):
             x_hat = F.relu(self.FC_output(h))
         return x_hat
 
-
 class VAEModel(nn.Module):
     def __init__(self, Encoder, Decoder):
         super(VAEModel, self).__init__()
@@ -132,7 +130,6 @@ class VAEModel(nn.Module):
         x_hat = self.Decoder(z)
 
         return x_hat, mean, log_var
-
 
 class VAEModelComb(nn.Module):
     def __init__(self, Encoder_sd, Encoder_ft, Encoder_sd_ft, Decoder_sd, Decoder_ft, Decoder_sd_ft):
@@ -171,7 +168,6 @@ class VAEModelComb(nn.Module):
         log_var = [log_var_sd, log_var_ft, log_var_sd_ft]
 
         return x_hat, mean, log_var
-
 
 class GNNModel(nn.Module):
     def __init__(self, input_dim, hiddenunits: List[int], num_classes, prob_matrix, bias=True, drop_prob=0.5):
@@ -314,6 +310,42 @@ class ForwardModel(nn.Module):
         return forward_loss
 
 ### Inference part
+def z_hat_initialization(vae_model, model_proj, model_rec,
+                         inf_proj_idx, nodes_name_G_recived, seed_name_received,
+                         device, lossFn,
+                         x, y, x_rec, y_rec,
+                         z_sd_plus, test_id, batch_size, input_optimizer, epochs=100,
+                         threshold=0.55):
+
+    for epoch in range(epochs):
+        input_optimizer.zero_grad()
+
+        z_sd_plus_bar = torch.mean(z_sd_plus, dim=0)
+        z_bar_repeat = z_sd_plus_bar.repeat(batch_size,1,1)
+        f_z_all = vae_model.Decoder_sd(z_bar_repeat)
+        f_z_bar = vae_model.Decoder_sd(z_sd_plus_bar)
+
+        y_hat = model_proj(f_z_all.squeeze())
+        seed_vector_rec = torch.zeros(y_rec.shape)
+        for p_i in range(y_hat.shape[0]):  # batch size
+            infect_proj = y_hat[p_i, :].cpu().clone().detach()
+            seed_value = infect_proj[inf_proj_idx]
+            seed_vector_rec[p_i, :][
+                np.where(
+                    nodes_name_G_recived.reshape(nodes_name_G_recived.size, 1) == seed_name_received
+                )[0]] = seed_value[np.where(
+                nodes_name_G_recived.reshape(nodes_name_G_recived.size, 1) == seed_name_received)[1]]
+        x_hat_rec = seed_vector_rec.to(device)
+        y_hat_rec = model_rec(x_hat_rec)
+
+        loss, pdf_loss = lossFn(y, y_hat, y_rec, y_hat_rec, f_z_all, f_z_bar)
+
+        loss.backward()
+        input_optimizer.step()
+
+    return z_sd_plus
+
+
 def x_hat_initialization(model_proj, model_rec,
                          inf_proj_idx, nodes_name_G_recived, seed_name_received,
                          device, lossFn,
