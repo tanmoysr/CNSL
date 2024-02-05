@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,26 +5,14 @@ import numpy as np
 import scipy.sparse as sp
 from typing import List
 from configuration import args
-## Inferece Libraries
 from torch.optim import Adam, SGD
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
-###MLP with lienar output
 class MLP(nn.Module):
     def __init__(self, num_layers, input_dim, hidden_dim, output_dim):
-        '''
-            num_layers: number of layers in the neural networks (EXCLUDING the input layer). If num_layers=1, this reduces to linear model.
-            input_dim: dimensionality of input features
-            hidden_dim: dimensionality of hidden units at ALL layers
-            output_dim: number of classes for prediction
-            device: which device to use
-        '''
-
         super(MLP, self).__init__()
-
-        self.linear_or_not = True  # default is linear model
+        self.linear_or_not = True
         self.num_layers = num_layers
-
         if num_layers < 1:
             raise ValueError("number of layers should be positive!")
         elif num_layers == 1:
@@ -37,12 +23,10 @@ class MLP(nn.Module):
             self.linear_or_not = False
             self.linears = torch.nn.ModuleList()
             self.batch_norms = torch.nn.ModuleList()
-
             self.linears.append(nn.Linear(input_dim, hidden_dim))
             for layer in range(num_layers - 2):
                 self.linears.append(nn.Linear(hidden_dim, hidden_dim))
             self.linears.append(nn.Linear(hidden_dim, output_dim))
-
             for layer in range(num_layers - 1):
                 self.batch_norms.append(nn.BatchNorm1d((hidden_dim)))
 
@@ -51,7 +35,6 @@ class MLP(nn.Module):
             # If linear model
             return self.linear(x)
         else:
-            # If MLP
             h = x
             for layer in range(self.num_layers - 1):
                 h = F.relu(self.batch_norms[layer](self.linears[layer](h)))
@@ -64,16 +47,10 @@ class Encoder(nn.Module):
         self.FC_input2 = nn.Linear(hidden_dim, hidden_dim)
         self.FC_mean = nn.Linear(hidden_dim, latent_dim)
         self.FC_var = nn.Linear(hidden_dim, latent_dim)
-
         self.bn = nn.BatchNorm1d(num_features=latent_dim)
 
     def forward(self, x):
         h_ = self.FC_input(x)
-        # h_ = F.relu(self.FC_input(x))
-
-        # h_ = F.relu(self.FC_input2(h_))
-        # h_ = self.FC_input2(h_)
-
         h_ = F.relu(self.FC_input2(h_))
         mean = self.FC_mean(h_)
         log_var = self.FC_var(h_)
@@ -89,14 +66,8 @@ class Decoder(nn.Module):
         self.seed_pred = seed_pred
         self.seed_plus = seed_plus
 
-        # self.prelu = nn.PReLU()
-
     def forward(self, x):
         h = F.relu(self.FC_input(x))
-        # h = self.FC_input(x)
-        # h = F.relu(self.FC_hidden_1(h))
-        # h = F.relu(self.FC_hidden_2(h))
-        # x_hat = torch.sigmoid(self.FC_output(h))
         h = self.FC_hidden_1(h)
         h = self.FC_hidden_2(h)
         if self.seed_pred:
@@ -128,7 +99,6 @@ class VAEModel(nn.Module):
             mean, log_var = self.Encoder(x)
         z = self.reparameterization(mean, log_var)  # takes exponential function (log var -> var)
         x_hat = self.Decoder(z)
-
         return x_hat, mean, log_var
 
 class VAEModelComb(nn.Module):
@@ -137,7 +107,6 @@ class VAEModelComb(nn.Module):
         self.Encoder_sd = Encoder_sd
         self.Encoder_ft = Encoder_ft
         self.Encoder_sd_ft = Encoder_sd_ft
-
         self.Decoder_sd = Decoder_sd
         self.Decoder_ft = Decoder_ft
         self.Decoder_sd_ft = Decoder_sd_ft
@@ -151,47 +120,35 @@ class VAEModelComb(nn.Module):
         mean_sd, log_var_sd = self.Encoder_sd(sd)
         mean_ft, log_var_ft = self.Encoder_ft(ft)
         mean_sd_ft, log_var_sd_ft = self.Encoder_sd_ft(sd_ft)
-
-        z_sd = self.reparameterization(mean_sd, log_var_sd)  # takes exponential function (log var -> var)
+        z_sd = self.reparameterization(mean_sd, log_var_sd)
         z_ft = self.reparameterization(mean_ft, log_var_ft)
         z_sd_ft = self.reparameterization(mean_sd_ft, log_var_sd_ft)
-
         z_sd_plus = torch.cat((z_sd, z_sd_ft), -1)
         z_ft_plus = torch.cat((z_ft, z_sd_ft), -1)
-
         x_hat_sd = self.Decoder_sd(z_sd_plus)
         x_hat_ft = self.Decoder_ft(z_ft_plus)
         x_hat_sd_ft = self.Decoder_sd_ft(z_sd_ft)
-
         x_hat = [x_hat_sd, x_hat_ft, x_hat_sd_ft]
         mean = [mean_sd, mean_ft, mean_sd_ft]
         log_var = [log_var_sd, log_var_ft, log_var_sd_ft]
-
         return x_hat, mean, log_var
 
 class GNNModel(nn.Module):
     def __init__(self, input_dim, hiddenunits: List[int], num_classes, prob_matrix, bias=True, drop_prob=0.5):
         super(GNNModel, self).__init__()
-
         self.input_dim = input_dim
-
         if sp.isspmatrix(prob_matrix):
             prob_matrix = prob_matrix.toarray()
-
         self.prob_matrix = nn.Parameter((torch.FloatTensor(prob_matrix)), requires_grad=False)
-
         fcs = [nn.Linear(input_dim, hiddenunits[0], bias=bias)]
         for i in range(1, len(hiddenunits)):
             fcs.append(nn.Linear(hiddenunits[i - 1], hiddenunits[i]))
         fcs.append(nn.Linear(hiddenunits[-1], num_classes))
-
         self.fcs = nn.ModuleList(fcs)
-
         if drop_prob is 0:
             self.dropout = lambda x: x
         else:
             self.dropout = nn.Dropout(drop_prob)
-
         self.act_fn = nn.ReLU()
 
     def forward(self, seed_vec):
@@ -218,20 +175,13 @@ class GNNModel(nn.Module):
 class DiffusionPropagate(nn.Module):
     def __init__(self, prob_matrix, niter):
         super(DiffusionPropagate, self).__init__()
-
         self.niter = niter
-
         if sp.isspmatrix(prob_matrix):
             prob_matrix = prob_matrix.toarray()
-
         self.register_buffer('prob_matrix', torch.FloatTensor(prob_matrix))
 
     def forward(self, preds, seed_idx):
-        # import ipdb; ipdb.set_trace()
         device = preds.device
-        # prop_preds = torch.ones((preds.shape[0], preds.shape[1])).to(device)
-
-
         for i in range(preds.shape[0]):
             prop_pred = preds[i]
             for j in range(self.niter):
@@ -244,24 +194,20 @@ class DiffusionPropagate(nn.Module):
                 prop_preds = prop_pred
             else:
                 prop_preds = torch.cat((prop_preds, prop_pred), 0)
-
         return prop_preds
 
 
 class InverseModel(nn.Module):
     def __init__(self, vae_model: nn.Module, gnn_model: nn.Module, propagate: nn.Module):
         super(InverseModel, self).__init__()
-
         self.vae_model = vae_model
         self.gnn_model = gnn_model
         self.propagate = propagate
-
         self.reg_params = list(filter(lambda x: x.requires_grad, self.gnn_model.parameters()))
 
     def forward(self, seed_vec, static_features, seed_features):
         device = next(self.gnn_model.parameters()).device
         seed_idx = torch.LongTensor(np.argwhere(seed_vec.cpu().detach().numpy() == 1)).to(device)
-
         seed_hat, mean, log_var = self.vae_model(seed_vec, static_features, seed_features)
         predictions = self.gnn_model(seed_hat[0].squeeze())
         predictions = self.propagate(predictions, seed_idx)
@@ -271,7 +217,6 @@ class InverseModel(nn.Module):
     def loss(self, x, x_hat, mean, log_var, y, y_hat):
         forward_loss = F.mse_loss(y_hat, y)
         reproduction_loss = F.binary_cross_entropy(x_hat, x, reduction='mean')
-        #reproduction_loss = F.mse_loss(x_hat, x)
         KLD = -0.5*torch.sum(1+ log_var - mean.pow(2) - log_var.exp())
         total_loss = forward_loss+reproduction_loss+ 1e-3 * KLD
         return KLD, reproduction_loss, forward_loss, total_loss
@@ -284,121 +229,16 @@ class ForwardModel(nn.Module):
         self.propagate = propagate
         self.relu = nn.ReLU(inplace=True)
         self.selu = nn.SELU(inplace=True)
-
         self.reg_params = list(filter(lambda x: x.requires_grad, self.gnn_model.parameters()))
 
     def forward(self, seed_vec):
         device = next(self.gnn_model.parameters()).device
-
-        # seed_idx = torch.LongTensor(np.argwhere(seed_vec.cpu().detach().numpy() == 1)).to(device)
         seed_idx = torch.LongTensor(np.argwhere(seed_vec.cpu().detach().numpy() >args.seed_threshold)).to(device)
-        # seed_idx = (seed_vec == 1).nonzero(as_tuple=False) # Used in SLVAE
-
-        predictions = self.gnn_model(seed_vec) # last layer is sigmoid
-        # predictions = self.gnn_model(seed_vec).squeeze()  # last layer is sigmoid
+        predictions = self.gnn_model(seed_vec)
         predictions = self.propagate(predictions, seed_idx)
-
-        predictions = (predictions + seed_vec)/2 # commented in SLVAE
-
-        # predictions = self.relu(predictions) # Used in SLVAE No impact (relu or selu)
-        # predictions = torch.sigmoid(predictions) # damaging
-
+        predictions = (predictions + seed_vec)/2
         return predictions
 
     def loss(self, y, y_hat):
         forward_loss = F.mse_loss(y_hat, y)
         return forward_loss
-
-### Inference part
-def z_hat_initialization(vae_model, model_proj, model_rec,
-                         inf_proj_idx, nodes_name_G_recived, seed_name_received,
-                         device, lossFn,
-                         x, y, x_rec, y_rec,
-                         z_sd_plus, test_id, batch_size, input_optimizer, epochs=100,
-                         threshold=0.55):
-
-    for epoch in range(epochs):
-        input_optimizer.zero_grad()
-
-        z_sd_plus_bar = torch.mean(z_sd_plus, dim=0)
-        z_bar_repeat = z_sd_plus_bar.repeat(batch_size,1,1)
-        f_z_all = vae_model.Decoder_sd(z_bar_repeat)
-        f_z_bar = vae_model.Decoder_sd(z_sd_plus_bar)
-
-        y_hat = model_proj(f_z_all.squeeze())
-        seed_vector_rec = torch.zeros(y_rec.shape)
-        for p_i in range(y_hat.shape[0]):  # batch size
-            infect_proj = y_hat[p_i, :].cpu().clone().detach()
-            seed_value = infect_proj[inf_proj_idx]
-            seed_vector_rec[p_i, :][
-                np.where(
-                    nodes_name_G_recived.reshape(nodes_name_G_recived.size, 1) == seed_name_received
-                )[0]] = seed_value[np.where(
-                nodes_name_G_recived.reshape(nodes_name_G_recived.size, 1) == seed_name_received)[1]]
-        x_hat_rec = seed_vector_rec.to(device)
-        y_hat_rec = model_rec(x_hat_rec)
-
-        loss, pdf_loss = lossFn(y, y_hat, y_rec, y_hat_rec, f_z_all, f_z_bar)
-
-        loss.backward()
-        input_optimizer.step()
-
-    return z_sd_plus
-
-
-def x_hat_initialization(model_proj, model_rec,
-                         inf_proj_idx, nodes_name_G_recived, seed_name_received,
-                         device, lossFn,
-                         x_hat, x, y, x_rec, y_rec,
-                         f_z_bar, test_id, input_optimizer, epochs=100,
-                         threshold=0.55):
-
-    initial_x, initial_x_performance = [], []
-
-    for epoch in range(epochs):
-        input_optimizer.zero_grad()
-        y_hat = model_proj(x_hat.squeeze())
-        seed_vector_rec = torch.zeros(y_rec.shape)
-        for p_i in range(y_hat.shape[0]):  # batch size
-            infect_proj = y_hat[p_i, :].cpu().clone().detach()
-            seed_value = infect_proj[inf_proj_idx]
-            seed_vector_rec[p_i, :][
-                np.where(
-                    nodes_name_G_recived.reshape(nodes_name_G_recived.size, 1) == seed_name_received
-                )[0]] = seed_value[np.where(
-                nodes_name_G_recived.reshape(nodes_name_G_recived.size, 1) == seed_name_received)[1]]
-        x_hat_rec = seed_vector_rec.to(device)
-        y_hat_rec = model_rec(x_hat_rec)
-
-        loss, pdf_loss = lossFn(y, y_hat, y_rec, y_hat_rec, x_hat, f_z_bar)
-
-        x_pred = x_hat.clone().cpu().detach()
-        # x = x_true.cpu().detach().numpy()
-
-        x_pred[x_pred > threshold] = 1
-        x_pred[x_pred != 1] = 0
-
-        x_true = x.cpu().detach()
-        seed_original = x_true.squeeze().cpu().detach().numpy().flatten()
-        seed_predicted = x_pred.squeeze().cpu().detach().numpy().flatten()
-
-        accuracy = accuracy_score(seed_original, seed_predicted)
-        precision = precision_score(seed_original, seed_predicted, zero_division=0)
-        recall = recall_score(seed_original, seed_predicted, zero_division=0)
-        f1 = f1_score(seed_original, seed_predicted, zero_division=0)
-
-        #         precision = precision_score(x[0], x_pred[0])
-        #         recall = recall_score(x[0], x_pred[0])
-        #         f1 = f1_score(x[0], x_pred[0])
-
-        loss.backward()
-        input_optimizer.step()
-
-        with torch.no_grad():
-            x_hat.clamp_(0, 1)
-
-        initial_x.append(x_hat)
-        # initial_x_performance.append([accuracy, precision, recall, f1])
-        initial_x_performance.append(f1)
-
-    return initial_x, initial_x_performance
