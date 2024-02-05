@@ -171,19 +171,20 @@ if vae_train_need:
     vae_model.train()
     sample_number = len(train_indices)
     epoch_dict_vae = {'reconstruction': [], 'kld': [], 'total_vae': [],
-                      'accuracy': [], 'precision': [], 'recall': [], 'time': []}
+                      'auc': [], 'time': []}
 
     ## Training
     for epoch in range(args.numEpochVAE):
 
         epoch_tic = time.perf_counter()
+
         re_overall = 0
         kld_overall = 0
         total_loss_vae = 0
+        seed_auc_all = 0
 
-        seed_accuracy_all = 0
-        seed_precision_all = 0
-        seed_recall_all = 0
+        seed_org_all = []
+        seed_hat_all = []
 
         dataloader_iterator = iter(train_set_rec)
         for batch_idx, data_pair in enumerate(train_set):
@@ -207,41 +208,35 @@ if vae_train_need:
             re_loss, kld, loss_vae = loss_functions.loss_vae(sf2, sf2_hat, mean, log_var)
             re_overall += re_loss.item() * x_hat.size(0)
             kld_overall += kld.item() * x_hat.size(0)
-            # for k in kld:
-            #     kld_overall += k.item() * x_hat.size(0)
             total_loss_vae += loss_vae.item() * x_hat.size(0)
 
             loss_vae.backward()
             optimizer_vae.step()
 
             ## Performance
-            x_pred = x_hat.cpu().detach()
-            x_pred[x_pred > args.seed_threshold] = 1  # 0.01
-            x_pred[x_pred != 1] = 0
-
             seed_original = x_true.squeeze().cpu().detach().numpy().flatten()
-            seed_predicted = x_pred.squeeze().cpu().detach().numpy().flatten()
+            seed_org_all.append(seed_original)
+            seed_hat = x_hat.squeeze().cpu().detach().numpy().flatten()
+            seed_hat_all.append(seed_hat)
 
-            seed_accuracy_all += accuracy_score(seed_original, seed_predicted)
-            seed_precision_all += precision_score(seed_original, seed_predicted, zero_division=0)
-            seed_recall_all += recall_score(seed_original, seed_predicted, zero_division=0)
+            seed_auc_all += roc_auc_score(seed_original.astype(int), seed_hat)
+
+        seed_org_all_np = torch.tensor(seed_org_all).detach().numpy().flatten()
+        seed_hat_all_np = torch.tensor(seed_hat_all).detach().numpy().flatten()
+        args.seed_threshold = utils.find_bestThreshold(seed_org_all_np, seed_hat_all_np)
 
         epoch_toc = time.perf_counter()
         epoch_time = epoch_toc - epoch_tic
         epoch_dict_vae['reconstruction'].append(re_overall / (batch_idx + 1))
         epoch_dict_vae['kld'].append(kld_overall / (batch_idx + 1))
         epoch_dict_vae['total_vae'].append(total_loss_vae / (batch_idx + 1))
-        epoch_dict_vae['accuracy'].append(seed_accuracy_all / (batch_idx + 1))
-        epoch_dict_vae['precision'].append(seed_precision_all / (batch_idx + 1))
-        epoch_dict_vae['recall'].append(seed_recall_all / (batch_idx + 1))
+        epoch_dict_vae['auc'].append(seed_auc_all / (batch_idx + 1))
         epoch_dict_vae['time'].append(epoch_time)
         print("VAE Epoch {}".format(epoch + 1),
               "\tReconstruction: {:.4f}".format(re_overall / (batch_idx + 1)),
               "\tKLD: {:.4f}".format(kld_overall / (batch_idx + 1)),
               "\tTotal: {:.4f}".format(total_loss_vae / (batch_idx + 1)),
-              "\tAccuracy: {:.4f}".format(seed_accuracy_all / (batch_idx + 1)),
-              "\tPrecision: {:.4f}".format(seed_precision_all / (batch_idx + 1)),
-              "\tRecall: {:.4f}".format(seed_recall_all / (batch_idx + 1)),
+              "\tAUC: {:.4f}".format(seed_auc_all / (batch_idx + 1)),
               "\tTime Taken: {:.6f}".format(epoch_time)
               )
     #%% saving  VAE models
@@ -277,17 +272,13 @@ optimizer_diffProj = Adam([{'params': forward_model_proj.parameters()}], lr=args
 if diff1_train_need:
     forward_model_proj.train()
     sample_number = len(train_indices)
-    epoch_dict_diffProj = {'total_diffProj': [], 'infect_precision': [], 'infect_recall': [], 'infect_accuracy': [],
-                           'time': []}
+    epoch_dict_diffProj = {'total_diffProj': [], 'infect_auc': [], 'time': []}
     for epoch in range(args.numEpochDiffProj):
 
         epoch_tic = time.perf_counter()
 
         total_loss_diffProj = 0
-
-        infect_accuracy_all = 0
-        infect_precision_all = 0
-        infect_recall_all = 0
+        infect_auc_all = 0
 
         dataloader_iterator = iter(train_set_rec)
         for batch_idx, data_pair in enumerate(train_set):
@@ -306,10 +297,6 @@ if diff1_train_need:
             x_true = x.cpu().detach()
             sf2 = [x, static_features.repeat(batch_size, 1, 1), x_features]
 
-            # x_rec = data_pair_rec[:, :, 0].unsqueeze(2).float().to(device)
-            # x_true_rec = x_rec.cpu().detach()
-            # y_rec = data_pair_rec[:, :, 1].to(device)
-
             sf2_hat, mean, log_var = vae_model(x, static_features.repeat(batch_size, 1, 1), x_features)
             x_hat, static_features_hat, x_features_hat = sf2_hat
             y_hat = forward_model_proj(x_hat.squeeze())
@@ -319,29 +306,19 @@ if diff1_train_need:
             loss_proj.backward()
             optimizer_diffProj.step()
 
-            y_pred = y_hat.cpu().detach()
-            y_pred[y_pred > args.seed_threshold] = 1  # 0.01
-            y_pred[y_pred != 1] = 0
-
             infected_original_proj = y.squeeze().cpu().detach().numpy().flatten()
-            infected_predicted_proj = y_pred.squeeze().cpu().detach().numpy().flatten()
+            infected_predicted_proj = y_hat.squeeze().cpu().detach().numpy().flatten()
 
-            infect_accuracy_all += accuracy_score(infected_original_proj, infected_predicted_proj)
-            infect_precision_all += precision_score(infected_original_proj, infected_predicted_proj, zero_division=0)
-            infect_recall_all += recall_score(infected_original_proj, infected_predicted_proj, zero_division=0)
+            infect_auc_all += roc_auc_score(infected_original_proj.astype(int), infected_predicted_proj)
 
         epoch_toc = time.perf_counter()
         epoch_time = epoch_toc - epoch_tic
         epoch_dict_diffProj['total_diffProj'].append(total_loss_diffProj / (batch_idx + 1))
-        epoch_dict_diffProj['infect_accuracy'].append(infect_accuracy_all / (batch_idx + 1))
-        epoch_dict_diffProj['infect_precision'].append(infect_precision_all / (batch_idx + 1))
-        epoch_dict_diffProj['infect_recall'].append(infect_recall_all / (batch_idx + 1))
+        epoch_dict_diffProj['infect_auc'].append(infect_auc_all / (batch_idx + 1))
         epoch_dict_diffProj['time'].append(epoch_time)
         print("Diffusion Projection Epoch {}".format(epoch + 1),
               "\tTotal: {:.4f}".format(total_loss_diffProj / (batch_idx + 1)),
-              "\tAccuracy: {:.4f}".format(infect_accuracy_all / (batch_idx + 1)),
-              "\tPrecision: {:.4f}".format(infect_precision_all / (batch_idx + 1)),
-              "\tRecall: {:.4f}".format(infect_recall_all / (batch_idx + 1)),
+              "\tAUC: {:.4f}".format(infect_auc_all / (batch_idx + 1)),
               "\tTime Taken: {:.6f}".format(epoch_time)
               )
 
@@ -371,17 +348,13 @@ optimizer_diffRec = Adam([{'params': forward_model_rec.parameters()}],lr=args.lr
 if diff2_train_need:
     forward_model_rec.train()
     sample_number = len(train_indices)
-    epoch_dict_diffRec = {'total_diffRec': [], 'infect_precision': [], 'infect_recall': [], 'infect_accuracy': [],
-                          'time': []}
+    epoch_dict_diffRec = {'total_diffRec': [], 'infect_auc': [], 'time': []}
     for epoch in range(args.numEpochDiffRec):
 
         epoch_tic = time.perf_counter()
 
         total_loss_diffRec = 0
-
-        infect_precision_all_rec = 0
-        infect_recall_all_rec = 0
-        infect_accuracy_all_rec = 0
+        infect_auc_all_rec = 0
 
         dataloader_iterator = iter(train_set_rec)
         for batch_idx, data_pair in enumerate(train_set):
@@ -444,29 +417,19 @@ if diff2_train_need:
             loss_rec.backward()
             optimizer_diffRec.step()
 
-            y_pred_rec = y_hat_rec.cpu().detach()
-            y_pred_rec[y_pred_rec > args.seed_threshold] = 1  # 0.01
-            y_pred_rec[y_pred_rec != 1] = 0
-
             infected_original_rec = y_rec.squeeze().cpu().detach().numpy().flatten()
-            infected_predicted_rec = y_pred_rec.squeeze().cpu().detach().numpy().flatten()
+            infected_predicted_rec = y_hat_rec.squeeze().cpu().detach().numpy().flatten()
 
-            infect_accuracy_all_rec += accuracy_score(infected_original_rec.astype(int), infected_predicted_rec.astype(int))
-            infect_precision_all_rec += precision_score(infected_original_rec.astype(int), infected_predicted_rec.astype(int), zero_division=0)
-            infect_recall_all_rec += recall_score(infected_original_rec.astype(int), infected_predicted_rec.astype(int), zero_division=0)
+            infect_auc_all_rec += roc_auc_score(infected_original_rec.astype(int), infected_predicted_rec)
 
         epoch_toc = time.perf_counter()
         epoch_time = epoch_toc - epoch_tic
         epoch_dict_diffRec['total_diffRec'].append(total_loss_diffRec / (batch_idx + 1))
-        epoch_dict_diffRec['infect_accuracy'].append(infect_accuracy_all_rec / (batch_idx + 1))
-        epoch_dict_diffRec['infect_precision'].append(infect_precision_all_rec / (batch_idx + 1))
-        epoch_dict_diffRec['infect_recall'].append(infect_recall_all_rec / (batch_idx + 1))
+        epoch_dict_diffRec['infect_auc'].append(infect_auc_all_rec / (batch_idx + 1))
         epoch_dict_diffRec['time'].append(epoch_time)
         print("Diffusion Receipient Epoch {}".format(epoch + 1),
               "\tTotal: {:.4f}".format(total_loss_diffRec / (batch_idx + 1)),
-              "\tAccuracy: {:.4f}".format(infect_accuracy_all_rec / (batch_idx + 1)),
-              "\tPrecision: {:.4f}".format(infect_precision_all_rec / (batch_idx + 1)),
-              "\tRecall: {:.4f}".format(infect_recall_all_rec / (batch_idx + 1)),
+              "\tAUC: {:.4f}".format(infect_auc_all_rec / (batch_idx + 1)),
               "\tTime Taken: {:.6f}".format(epoch_time)
               )
     #%% saving diffusion recipient models
@@ -487,10 +450,7 @@ forward_model_rec.eval()
 if all_train_need:
     sample_number = len(train_indices)
     epoch_dict = {'reconstruction': [], 'kld': [], 'total': [],
-                  'seed accuracy': [], 'seed precision': [], 'seed recall': [],
-                  'accuracy': [], 'precision': [], 'recall': [],
-                  'accuracy_rec': [], 'precision_rec': [], 'recall_rec': [],
-                  'time': []}
+                  'seed auc': [], 'auc_proj': [], 'auc_rec': [], 'time': []}
     for param in vae_model.parameters():
         param.requires_grad = True
     for param in feature_representer.parameters():
@@ -511,16 +471,10 @@ if all_train_need:
         kld_overall = 0
         total_overall = 0
 
-        seed_accuracy_all = 0
-        seed_precision_all = 0
-        seed_recall_all = 0
+        seed_auc_all = 0
+        auc_all_proj = 0
+        auc_all_rec = 0
 
-        precision_all = 0
-        recall_all = 0
-        accuracy_all = 0
-        precision_all_rec = 0
-        recall_all_rec = 0
-        accuracy_all_rec = 0
 
         dataloader_iterator = iter(train_set_rec)
         for batch_idx, data_pair in enumerate(train_set):
@@ -547,8 +501,6 @@ if all_train_need:
             sf2_hat, mean, log_var = vae_model(x, static_features.repeat(batch_size, 1, 1), x_features)
             x_hat, static_features_hat, x_features_hat = sf2_hat
             y_hat = forward_model_proj(x_hat.squeeze())
-            # x_hat_det = x_hat.detach()
-            # y_hat = forward_model_proj(x_hat_det.squeeze())
 
             seed_vector_rec = torch.zeros(y_rec.shape)
             for p_i in range(y_hat.shape[0]):  # batch size
@@ -572,87 +524,47 @@ if all_train_need:
 
             loss_inf = loss_functions.loss_infect(y_hat, y, y_hat_rec, y_rec)
             loss = loss_vae + loss_inf
-            # loss = loss_vae + loss_proj + loss_rec
             loss.backward()
             total_overall += loss.item() * x_hat.size(0)
-            # loss = loss_vae + loss_proj + loss_rec
-            # loss = torch.tensor([loss_vae, loss_inf])
-            # loss = torch.tensor([loss_vae, loss_proj, loss_rec])
-            # total_overall += (loss_vae + loss_proj + loss_rec).item() * x_hat.size(0)
-            # total_overall += loss.item() * x_hat.size(0)
-
-            # loss_vae.backward()
-            # optimizer.zero_grad()
-            # loss_inf.backward()
-            # optimizer.zero_grad()
-            # loss.backward()
-            # loss.backward(gradient=torch.tensor([1.0, 1.0, 1.0]), retain_graph=True)
-            # optimizer.step()
 
             ## Performance
-            x_pred = x_hat.cpu().detach()
-            x_pred[x_pred > args.seed_threshold] = 1  # 0.01
-            x_pred[x_pred != 1] = 0
-
             seed_original = x_true.squeeze().cpu().detach().numpy().flatten()
-            seed_predicted = x_pred.squeeze().cpu().detach().numpy().flatten()
-
-            seed_accuracy_all += accuracy_score(seed_original, seed_predicted)
-            seed_precision_all += precision_score(seed_original, seed_predicted, zero_division=0)
-            seed_recall_all += recall_score(seed_original, seed_predicted, zero_division=0)
-
-            y_pred = y_hat.cpu().detach()
-            y_pred[y_pred > args.seed_threshold] = 1  # 0.01
-            y_pred[y_pred != 1] = 0
+            seed_predicted = x_hat.squeeze().cpu().detach().numpy().flatten()
+            seed_auc_all += roc_auc_score(seed_original.astype(int), seed_predicted)
 
             infected_original_proj = y.squeeze().cpu().detach().numpy().flatten()
-            infected_predicted_proj = y_pred.squeeze().cpu().detach().numpy().flatten()
-
-            accuracy_all += accuracy_score(infected_original_proj, infected_predicted_proj)
-            precision_all += precision_score(infected_original_proj, infected_predicted_proj, zero_division=0)
-            recall_all += recall_score(infected_original_proj, infected_predicted_proj, zero_division=0)
-
-            y_pred_rec = y_hat_rec.cpu().detach()
-            y_pred_rec[y_pred_rec > args.seed_threshold] = 1  # 0.01
-            y_pred_rec[y_pred_rec != 1] = 0
+            infected_predicted_proj = y_hat.squeeze().cpu().detach().numpy().flatten()
+            auc_all_proj += roc_auc_score(infected_original_proj.astype(int), infected_predicted_proj)
 
             infected_original_rec = y_rec.squeeze().cpu().detach().numpy().flatten()
-            infected_predicted_rec = y_pred_rec.squeeze().cpu().detach().numpy().flatten()
-
-            accuracy_all_rec += accuracy_score(infected_original_rec.astype(int), infected_predicted_rec.astype(int))
-            precision_all_rec += precision_score(infected_original_rec.astype(int), infected_predicted_rec.astype(int), zero_division=0)
-            recall_all_rec += recall_score(infected_original_rec.astype(int), infected_predicted_rec.astype(int), zero_division=0)
-
+            infected_predicted_rec = y_hat_rec.squeeze().cpu().detach().numpy().flatten()
+            auc_all_rec += roc_auc_score(infected_original_rec.astype(int), infected_predicted_rec)
+        epoch_dict = {'reconstruction': [], 'kld': [], 'total': [],
+                      'seed auc': [], 'auc_proj': [], 'auc_rec': [], 'time': []}
         epoch_toc = time.perf_counter()
         epoch_time = epoch_toc-epoch_tic
         epoch_dict['reconstruction'].append(re_overall / (batch_idx + 1))
         epoch_dict['kld'].append(kld_overall / (batch_idx + 1))
         epoch_dict['total'].append(total_overall / (batch_idx + 1))
-        epoch_dict['seed accuracy'].append(seed_accuracy_all / (batch_idx + 1))
-        epoch_dict['seed precision'].append(seed_precision_all / (batch_idx + 1))
-        epoch_dict['seed recall'].append(seed_recall_all / (batch_idx + 1))
-        epoch_dict['accuracy'].append(accuracy_all / (batch_idx + 1))
-        epoch_dict['precision'].append(precision_all / (batch_idx + 1))
-        epoch_dict['recall'].append(recall_all / (batch_idx + 1))
-        epoch_dict['accuracy_rec'].append(accuracy_all_rec / (batch_idx + 1))
-        epoch_dict['precision_rec'].append(precision_all_rec / (batch_idx + 1))
-        epoch_dict['recall_rec'].append(recall_all_rec / (batch_idx + 1))
+        epoch_dict['seed auc'].append(seed_auc_all / (batch_idx + 1))
+        epoch_dict['auc_proj'].append(auc_all_proj / (batch_idx + 1))
+        epoch_dict['auc_rec'].append(auc_all_rec / (batch_idx + 1))
         epoch_dict['time'].append(epoch_time)
         print("Epoch: {}".format(epoch + 1),
               "\tReconstruction: {:.4f}".format(re_overall / (batch_idx + 1)),
               "\tKLD: {:.4f}".format(kld_overall / (batch_idx + 1)),
               "\tTotal: {:.4f}".format(total_overall / (batch_idx + 1)),
-          "\tSeed Accuracy: {:.4f}".format(seed_accuracy_all / (batch_idx + 1)),
-          "\tSeed Precision: {:.4f}".format(seed_precision_all / (batch_idx + 1)),
-          "\tSeed Recall: {:.4f}".format(seed_recall_all / (batch_idx + 1)),
-              "\tAccuracy: {:.4f}".format(accuracy_all / (batch_idx + 1)),
-              "\tPrecision: {:.4f}".format(precision_all / (batch_idx + 1)),
-              "\tRecall: {:.4f}".format(recall_all / (batch_idx + 1)),
-              "\tAccuracy_rec: {:.4f}".format(accuracy_all_rec / (batch_idx + 1)),
-              "\tPrecision_rec: {:.4f}".format(precision_all_rec / (batch_idx + 1)),
-              "\tRecall_rec: {:.4f}".format(recall_all_rec / (batch_idx + 1)),
-              "\tTime Taken: {:.6f}".format(epoch_time),
+          "\tSeed AUC: {:.4f}".format(seed_auc_all / (batch_idx + 1)),
+              "\tAUC Projection: {:.4f}".format(auc_all_proj / (batch_idx + 1)),
+              "\tAUC Receiving: {:.4f}".format(auc_all_rec / (batch_idx + 1)),
+              "\tTime Taken: {:.6f}".format(epoch_time)
               )
+    # Finding best threshold
+    print("Threshold for Seed {}, Projected Graph {}, Receiving Graph {}".format(
+        utils.find_bestThreshold(seed_original, seed_predicted),
+        utils.find_bestThreshold(infected_original_proj, infected_predicted_proj),
+        utils.find_bestThreshold(infected_original_rec, infected_predicted_rec)
+    ))
     # saving models
     feature_representer_chk_file = args.model_loc + 'feature_representer_final_' + args.dataset + '_' + args.diffusion_model_proj + '2' + args.diffusion_model_rec + str(
         10 * args.seed_rate) + '.ckpt'
