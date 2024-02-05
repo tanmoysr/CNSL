@@ -212,8 +212,6 @@ x_hat.requires_grad = True
 print("Final Inference Started ...")
 optimizer_input = Adam([x_hat], lr=args.lr_Infer, weight_decay=args.wd_Infer)
 
-BN = nn.BatchNorm1d(1, affine=False).to(device)
-
 sample_number = len(test_indices)
 
 epoch_dict = {'loss': [], 'forward_loss': [],
@@ -262,7 +260,7 @@ for epoch in range(args.numEpochInfer):
                 nodes_name_G_recived.reshape(nodes_name_G_recived.size, 1) == seed_name_received)[1]]
         x_hat_rec = seed_vector_rec.to(device)
         y_hat_rec = forward_model_rec(x_hat_rec)
-        loss, forward_loss = loss_functions.loss_inverse(y, y_hat, y_rec, y_hat_rec, x_hat, f_z_all, BN, device)
+        loss, forward_loss = loss_functions.loss_inverse(y_rec, y_hat_rec, x_hat)
         loss_overall += loss.item() * x_hat.size(0)
         forward_overall += forward_loss.item() * x_hat.size(0)
 
