@@ -60,10 +60,7 @@ G_proj, proj_nodes, G_received, receipient_nodes = graph['original_graph_proj'],
 
 nodes_name_G_proj = np.array(list(G_proj.nodes()))
 nodes_name_G_recived = np.array(list(G_received.nodes()))
-
-# String conversion
-receipient_nodes = receipient_nodes.astype(str)
-nodes_name_G_recived = nodes_name_G_recived.astype(str)
+# nodes_name_G_recived = nodes_name_G_recived.astype(str)
 
 inf_proj_idx = []
 for i in nodes_name_G_proj:
@@ -177,94 +174,69 @@ forward_model_rec.load_state_dict(checkpoint_forward_model_rec)
 forward_model_rec.to(device)
 forward_model_rec.eval()
 
-#%% Inference
-dataloader_iterator = iter(test_set_rec)
-for batch_idx, data_pair in enumerate(test_set):
-    try:
-        data_pair_rec = next(dataloader_iterator)
-    except StopIteration:
-        dataloader_iterator = iter(test_set_rec)
-        data_pair_rec = next(dataloader_iterator)
+#%% Inference Initialization
+print("Inference Initialization Started ...")
+train_merge = torch.tensor(np.vstack(np.array([t.numpy() for t in list(np.array(list(enumerate(train_set)))[:,1])])))
+train_x = train_merge[:, :, 0].float().to(device)
+train_y = train_merge[:, :, 1].float().to(device)
 
-    x = data_pair[:, :, 0].unsqueeze(2).float().to(device)
-    y = data_pair[:, :, 1].to(device)
-    train_merge = torch.tensor(np.vstack(np.array([t.numpy() for t in list(np.array(list(enumerate(train_set)))[:,1])])))
-    train_x = train_merge[:, :, 0].float().to(device)
-    train_y = train_merge[:, :, 1].float().to(device)
-
-    x_rec = data_pair_rec[:, :, 0].unsqueeze(2).float().to(device)
-    x_true_rec = x_rec.cpu().detach()
-    y_rec = data_pair_rec[:, :, 1].to(device)
-
-    with torch.no_grad():
-        x_features = torch.cat((train_x.unsqueeze(-1), feature_representer(static_features).repeat(80, 1, 1)), -1)
-        # x_features.shape
-        sf2 = [train_x.unsqueeze(-1), static_features.repeat(80, 1, 1), x_features]
-        sf2_hat, mean, log_var = vae_model(train_x.unsqueeze(-1), static_features.repeat(80, 1, 1), x_features)
-
-        ## Getting latent distribution
-        mean_sd, log_var_sd = vae_model.Encoder_sd(train_x.unsqueeze(-1))
-        mean_ft, log_var_ft = vae_model.Encoder_ft(static_features.repeat(80, 1, 1))
-        mean_sd_ft, log_var_sd_ft = vae_model.Encoder_sd_ft(x_features)
-
-        z_sd = vae_model.reparameterization(mean_sd, log_var_sd)  # takes exponential function (log var -> var)
-        z_ft = vae_model.reparameterization(mean_ft, log_var_ft)
-        z_sd_ft = vae_model.reparameterization(mean_sd_ft, log_var_sd_ft)
-
-        z_sd_plus = torch.cat((z_sd, z_sd_ft), -1)
-        z_ft_plus = torch.cat((z_ft, z_sd_ft), -1)
-
-        z_sd_plus_bar = torch.mean(z_sd_plus, dim=0)
-
-        f_z_all = vae_model.Decoder_sd(z_sd_plus)
-        f_z_bar = vae_model.Decoder_sd(z_sd_plus_bar)
-
-        x_hat = torch.sigmoid(torch.randn(f_z_all[:batch_size].shape)).to(device)
-    x_hat.requires_grad = True
-
-    optimizer_input_init = Adam([x_hat], lr=args.lr_InferInit, weight_decay=args.wd_InferInit)
-
-    print("Inference initialization for batch id {}".format(batch_idx))
-    initial_x, initial_x_f1 = models.x_hat_initialization(forward_model_proj, forward_model_rec,
-                                                     inf_proj_idx, nodes_name_G_recived, seed_name_received,
-                                                     device, loss_functions.loss_inverse_initial,
-                                                     x_hat, x, y, x_rec, y_rec,
-                                                     f_z_bar, batch_idx, input_optimizer = optimizer_input_init,
-                                                     epochs=args.numEpochInferInit, threshold=args.seed_threshold)
 with torch.no_grad():
-    #init_x = torch.sigmoid(initial_x[initial_x_f1.index(max(initial_x_f1))])
-    init_x = initial_x[initial_x_f1.index(max(initial_x_f1))]
-# init_x = torch.bernoulli(init_x)
+    x_features = torch.cat((train_x.unsqueeze(-1), feature_representer(static_features).repeat(train_x.shape[0], 1, 1)), -1)
+    # x_features.shape
+    sf2 = [train_x.unsqueeze(-1), static_features.repeat(train_x.shape[0], 1, 1), x_features]
+    sf2_hat, mean, log_var = vae_model(train_x.unsqueeze(-1), static_features.repeat(train_x.shape[0], 1, 1), x_features)
 
-init_x.requires_grad = True
+    ## Getting latent distribution
+    mean_sd, log_var_sd = vae_model.Encoder_sd(train_x.unsqueeze(-1))
+    mean_ft, log_var_ft = vae_model.Encoder_ft(static_features.repeat(train_x.shape[0], 1, 1))
+    mean_sd_ft, log_var_sd_ft = vae_model.Encoder_sd_ft(x_features)
 
+    z_sd = vae_model.reparameterization(mean_sd, log_var_sd)  # takes exponential function (log var -> var)
+    z_ft = vae_model.reparameterization(mean_ft, log_var_ft)
+    z_sd_ft = vae_model.reparameterization(mean_sd_ft, log_var_sd_ft)
+
+    z_sd_plus = torch.cat((z_sd, z_sd_ft), -1)
+    z_ft_plus = torch.cat((z_ft, z_sd_ft), -1)
+
+    z_sd_plus_bar = torch.mean(z_sd_plus, dim=0)
+
+    f_z_all = vae_model.Decoder_sd(z_sd_plus)
+    f_z_bar = vae_model.Decoder_sd(z_sd_plus_bar)
+
+    x_hat = torch.sigmoid(torch.randn(f_z_all[:batch_size].shape)).to(device)
+    x_hat = f_z_bar.repeat(batch_size, 1, 1).to(device)
+
+x_hat.requires_grad = True
+
+#%% Final Inference
+print("Final Inference Started ...")
 optimizer_input = Adam([x_hat], lr=args.lr_Infer, weight_decay=args.wd_Infer)
 
 BN = nn.BatchNorm1d(1, affine=False).to(device)
-print("Final Inference Started ...")
+
 sample_number = len(test_indices)
+
 epoch_dict = {'loss': [], 'forward_loss': [],
-                  'seed accuracy': [], 'seed precision': [], 'seed recall': [],
-                  'accuracy': [], 'precision': [], 'recall': [],
-                  'accuracy_rec': [], 'precision_rec': [], 'recall_rec': [],
-                  'time': []}
+                  'seed accuracy': [], 'seed precision': [], 'seed precision k': [], 'seed recall': [],
+                'seed_f1': [], 'seed_auc': [], 'auc_proj': [], 'auc_rec': [], 'time': []}
 for epoch in range(args.numEpochInfer):
+
     epoch_tic = time.perf_counter()
     loss_overall = 0
     forward_overall = 0
     seed_accuracy_all = 0
     seed_precision_all = 0
+    seed_precision_k_all = 0
     seed_recall_all = 0
-    precision_all = 0
-    recall_all = 0
-    accuracy_all = 0
-    precision_all_rec = 0
-    recall_all_rec = 0
-    accuracy_all_rec = 0
+    seed_f1_all = 0
+    seed_auc_all = 0
+    auc_all_proj = 0
+    auc_all_rec = 0
 
     optimizer_input.zero_grad()
+
+    dataloader_iterator = iter(test_set_rec)
     for batch_idx, data_pair in enumerate(test_set):
-        # print("Inference finalization for batch id {}".format(batch_idx))
         try:
             data_pair_rec = next(dataloader_iterator)
         except StopIteration:
@@ -278,7 +250,7 @@ for epoch in range(args.numEpochInfer):
         x_true_rec = x_rec.cpu().detach()
         y_rec = data_pair_rec[:, :, 1].to(device)
 
-        y_hat = forward_model_proj(init_x.squeeze())
+        y_hat = forward_model_proj(x_hat.squeeze())
         seed_vector_rec = torch.zeros(y_rec.shape)
         for p_i in range(y_hat.shape[0]):  # batch size
             infect_proj = y_hat[p_i, :].cpu().clone().detach()
@@ -290,7 +262,7 @@ for epoch in range(args.numEpochInfer):
                 nodes_name_G_recived.reshape(nodes_name_G_recived.size, 1) == seed_name_received)[1]]
         x_hat_rec = seed_vector_rec.to(device)
         y_hat_rec = forward_model_rec(x_hat_rec)
-        loss, forward_loss = loss_functions.loss_inverse(y, y_hat, y_rec, y_hat_rec, init_x, f_z_all, BN, device)
+        loss, forward_loss = loss_functions.loss_inverse(y, y_hat, y_rec, y_hat_rec, x_hat, f_z_all, BN, device)
         loss_overall += loss.item() * x_hat.size(0)
         forward_overall += forward_loss.item() * x_hat.size(0)
 
@@ -299,65 +271,54 @@ for epoch in range(args.numEpochInfer):
 
         ## Performance
         x_pred = x_hat.cpu().detach()
-        x_pred[x_pred > args.seed_threshold] = 1  # 0.01
+        x_pred[x_pred > args.seed_threshold] = 1
         x_pred[x_pred != 1] = 0
 
         seed_original = x_true.squeeze().cpu().detach().numpy().flatten()
+        seed_hat = x_hat.squeeze().cpu().detach().numpy().flatten()
         seed_predicted = x_pred.squeeze().cpu().detach().numpy().flatten()
 
-        seed_accuracy_all += accuracy_score(seed_original, seed_predicted)
-        seed_precision_all += precision_score(seed_original, seed_predicted, zero_division=0)
-        seed_recall_all += recall_score(seed_original, seed_predicted, zero_division=0)
-
-        y_pred = y_hat.cpu().detach()
-        y_pred[y_pred > args.seed_threshold] = 1  # 0.01
-        y_pred[y_pred != 1] = 0
+        seed_accuracy_all += accuracy_score(seed_original.astype(int), seed_predicted.astype(int))
+        seed_precision_all += precision_score(seed_original.astype(int), seed_predicted.astype(int), zero_division=0)
+        seed_precision_k_all +=utils.precision_at_k_score(seed_original.astype(int), seed_hat)
+        seed_recall_all += recall_score(seed_original.astype(int), seed_predicted.astype(int), zero_division=0)
+        seed_f1_all += f1_score(seed_original.astype(int), seed_predicted.astype(int))
+        seed_auc_all += roc_auc_score(seed_original, seed_hat)
 
         infected_original_proj = y.squeeze().cpu().detach().numpy().flatten()
-        infected_predicted_proj = y_pred.squeeze().cpu().detach().numpy().flatten()
-
-        accuracy_all += accuracy_score(infected_original_proj, infected_predicted_proj)
-        precision_all += precision_score(infected_original_proj, infected_predicted_proj, zero_division=0)
-        recall_all += recall_score(infected_original_proj, infected_predicted_proj, zero_division=0)
-
-        y_pred_rec = y_hat_rec.cpu().detach()
-        y_pred_rec[y_pred_rec > args.seed_threshold] = 1  # 0.01
-        y_pred_rec[y_pred_rec != 1] = 0
+        infected_predicted_proj = y_hat.squeeze().cpu().detach().numpy().flatten()
+        auc_all_proj += roc_auc_score(infected_original_proj, infected_predicted_proj)
 
         infected_original_rec = y_rec.squeeze().cpu().detach().numpy().flatten()
-        infected_predicted_rec = y_pred_rec.squeeze().cpu().detach().numpy().flatten()
+        infected_predicted_rec = y_hat_rec.squeeze().cpu().detach().numpy().flatten()
+        auc_all_rec += roc_auc_score(infected_original_rec, infected_predicted_rec)
 
-        accuracy_all_rec += accuracy_score(infected_original_rec.astype(int), infected_predicted_rec.astype(int))
-        precision_all_rec += precision_score(infected_original_rec.astype(int), infected_predicted_rec.astype(int), zero_division=0)
-        recall_all_rec += recall_score(infected_original_rec.astype(int), infected_predicted_rec.astype(int), zero_division=0)
-
+    args.seed_threshold = utils.find_bestThreshold(seed_original, seed_hat)
     epoch_toc = time.perf_counter()
     epoch_time = epoch_toc - epoch_tic
     epoch_dict['loss'].append(loss_overall / (batch_idx + 1))
     epoch_dict['forward_loss'].append(forward_overall / (batch_idx + 1))
     epoch_dict['seed accuracy'].append(seed_accuracy_all / (batch_idx + 1))
     epoch_dict['seed precision'].append(seed_precision_all / (batch_idx + 1))
+    epoch_dict['seed precision k'].append(seed_precision_k_all / (batch_idx + 1))
     epoch_dict['seed recall'].append(seed_recall_all / (batch_idx + 1))
-    epoch_dict['accuracy'].append(accuracy_all / (batch_idx + 1))
-    epoch_dict['precision'].append(precision_all / (batch_idx + 1))
-    epoch_dict['recall'].append(recall_all / (batch_idx + 1))
-    epoch_dict['accuracy_rec'].append(accuracy_all_rec / (batch_idx + 1))
-    epoch_dict['precision_rec'].append(precision_all_rec / (batch_idx + 1))
-    epoch_dict['recall_rec'].append(recall_all_rec / (batch_idx + 1))
+    epoch_dict['seed_f1'].append(seed_f1_all / (batch_idx + 1))
+    epoch_dict['seed_auc'].append(seed_auc_all / (batch_idx + 1))
+    epoch_dict['auc_proj'].append(auc_all_proj / (batch_idx + 1))
+    epoch_dict['auc_rec'].append(auc_all_rec / (batch_idx + 1))
     epoch_dict['time'].append(epoch_time)
     print("Epoch: {}".format(epoch + 1),
           "\tLoss: {:.4f}".format(loss_overall / (batch_idx + 1)),
           "\tForward Loss: {:.4f}".format(forward_overall / (batch_idx + 1)),
-          "\tSeed Accuracy: {:.4f}".format(seed_accuracy_all / (batch_idx + 1)),
+          # "\tSeed Accuracy: {:.4f}".format(seed_accuracy_all / (batch_idx + 1)),
           "\tSeed Precision: {:.4f}".format(seed_precision_all / (batch_idx + 1)),
+          "\tSeed Precision K : {:.4f}".format(seed_precision_k_all / (batch_idx + 1)),
           "\tSeed Recall: {:.4f}".format(seed_recall_all / (batch_idx + 1)),
-          "\tAccuracy: {:.4f}".format(accuracy_all / (batch_idx + 1)),
-          "\tPrecision: {:.4f}".format(precision_all / (batch_idx + 1)),
-          "\tRecall: {:.4f}".format(recall_all / (batch_idx + 1)),
-          "\tAccuracy_rec: {:.4f}".format(accuracy_all_rec / (batch_idx + 1)),
-          "\tPrecision_rec: {:.4f}".format(precision_all_rec / (batch_idx + 1)),
-          "\tRecall_rec: {:.4f}".format(recall_all_rec / (batch_idx + 1)),
-          "\tTime Taken: {:.6f}".format(epoch_time),
+          "\tSeed F1: {:.4f}".format(seed_f1_all / (batch_idx + 1)),
+          "\tSeed AUC: {:.4f}".format(seed_auc_all / (batch_idx + 1)),
+          "\tAUC Proj: {:.4f}".format(auc_all_proj / (batch_idx + 1)),
+          "\tAUC Rec: {:.4f}".format(auc_all_rec / (batch_idx + 1)),
+          "\tTime Taken: {:.6f}".format(epoch_time)
           )
 epoch_df = pd.DataFrame.from_dict(epoch_dict)
 epoch_df.index = epoch_df.index.rename('epochs')
