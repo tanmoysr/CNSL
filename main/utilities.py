@@ -2,6 +2,7 @@
 import torch
 import numpy as np
 import scipy.sparse as sp
+import pandas as pd
 import math
 import copy
 import torch.nn as nn
@@ -11,6 +12,8 @@ import ndlib.models.ModelConfig as mc
 import ndlib.models.epidemics as ep
 import random
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import precision_recall_curve
+
 def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     """Convert a scipy sparse matrix to a torch sparse tensor."""
     sparse_mx = sparse_mx.tocoo().astype(np.float32)
@@ -132,3 +135,78 @@ class MultipleOptimizer(object):
     def step(self):
         for op in self.optimizers:
             op.step()
+
+def find_bestThreshold(labels,preds):
+    # calculate pr curve
+    precision, recall, thresholds = precision_recall_curve(labels, preds)
+
+    # convert to f score
+    fscore = (2 * precision * recall) / (precision + recall)
+    # locate the index of the largest f score
+    ix = np.argmax(fscore)
+    print('Best Threshold=%f, F-Score=%.3f' % (thresholds[ix], fscore[ix]))
+    return thresholds[ix]
+
+def precision_at_k_score(y_true, y_pred_proba, k=100, pos_label=1):
+    topk = [
+        y_true_ == pos_label
+        for y_true_, y_pred_proba_
+        in sorted(
+            zip(y_true, y_pred_proba),
+            key=lambda y: y[1],
+            reverse=True
+        )[:k]
+    ]
+    return sum(topk) / len(topk)
+
+
+def precision_at_k(df: pd.DataFrame, k: int, y_test: str, y_pred: str) -> float:
+    """
+    Function to compute precision@k for an input boolean dataframe
+
+    Inputs:
+        df     -> pandas dataframe containing boolean columns y_test & y_pred
+        k      -> integer number of items to consider
+        y_test -> string name of column containing actual user input
+        y-pred -> string name of column containing recommendation output
+
+    Output:
+        Floating-point number of precision value for k items
+    """
+    # extract the k rows
+    dfK = df.head(k)
+    # compute number of recommended items @k
+    denominator = dfK[y_pred].sum()
+    # compute number of recommended items that are relevant @k
+    numerator = dfK[dfK[y_pred] & dfK[y_test]].shape[0]
+    # return result
+    if denominator > 0:
+        return numerator / denominator
+    else:
+        return None
+
+
+def recall_at_k(df: pd.DataFrame, k: int, y_test: str, y_pred: str) -> float:
+    """
+    Function to compute recall@k for an input boolean dataframe
+
+    Inputs:
+        df     -> pandas dataframe containing boolean columns y_test & y_pred
+        k      -> integer number of items to consider
+        y_test -> string name of column containing actual user input
+        y-pred -> string name of column containing recommendation output
+
+    Output:
+        Floating-point number of recall value for k items
+    """
+    # extract the k rows
+    dfK = df.head(k)
+    # compute number of all relevant items
+    denominator = df[y_test].sum()
+    # compute number of recommended items that are relevant @k
+    numerator = dfK[dfK[y_pred] & dfK[y_test]].shape[0]
+    # return result
+    if denominator > 0:
+        return numerator / denominator
+    else:
+        return None
