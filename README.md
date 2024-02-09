@@ -27,7 +27,3 @@ If you want to change the configuration, you can do it in the file [configuratio
 * For example to change the number of epochs for inference:
 
 `python run_inference.py -eInfer 100`
-![Training_All](./saved_models/train_log_github2stackTest__LT2IC102023-11-10%2016-04-45.png)
-
-[plotting_inference.py](./plotting/plotting_inference.py) will show the progress of inference:
-![Inference](./saved_models/Inference_log_github2stackTest__LT2IC102023-11-10%2018-39-14.png)
