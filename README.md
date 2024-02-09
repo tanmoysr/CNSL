@@ -1,5 +1,4 @@
 # Cross Network Source Localization
-The goal of this project is to source localization of cross network.
 
 ## Project Setup
 Install the required packages.
