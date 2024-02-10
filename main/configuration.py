@@ -7,15 +7,15 @@ parser = argparse.ArgumentParser(description="CrossNet")
 datasets = ['github2stack_', 'colocation2social_']
 parser.add_argument("-d", "--dataset", default="colocation2social_", type=str,
                     help="one of: {}".format(", ".join(sorted(datasets))))
-diffusion = ['IC', 'LT', 'SIS', 'Sim']
-parser.add_argument("-dm_p", "--diffusion_model_proj", required=False, default="Sim", type=str,
+diffusion = ['IC', 'LT', 'SIS', 'SimA', 'SimB']
+parser.add_argument("-dm_p", "--diffusion_model_proj", required=False, default="SimA", type=str,
                     help="one of: {}".format(", ".join(sorted(diffusion))))
-parser.add_argument("-dm_r", "--diffusion_model_rec", required=False, default="Sim", type=str,
+parser.add_argument("-dm_r", "--diffusion_model_rec", required=False, default="SimA", type=str,
                     help="one of: {}".format(", ".join(sorted(diffusion))))
 seed_rate = [0, 1] # In dataset 0, 10
 parser.add_argument("-sp", "--seed_rate", required=False, default=0, type=int,
                     help="one of: {}".format(", ".join(str(sorted(seed_rate)))))
-sample = [100, 98, 85] # In dataset 100 for github, 98 for Sim2500 & 85 for Sim4000
+sample = [100, 98, 85] # In dataset 100 for github, 98 for SimA & 85 for SimB
 parser.add_argument("-sam", "--sample", required=False, default=98, type=int,
                     help="Data samples from one of: {}".format(", ".join(str(sorted(sample)))))
 input_features = [4, 15] # Github: 4, Social: 15
@@ -32,7 +32,7 @@ parser.add_argument("-e", "--numEpoch", required=False, default=15, type=int,
                     help="Number of Epochs") # 3 for Git2Stack; 15 for Sim,
 parser.add_argument("-bs", "--batchSize", required=False, default=2, type=int,
                     help="Batch Size. Minimum=2") # 2
-parser.add_argument("-bsInfer", "--batchSizeInfer", required=False, default=10, type=int,
+parser.add_argument("-bsInfer", "--batchSizeInfer", required=False, default=2, type=int,
                     help="Batch Size. Minimum=2") # 2
 parser.add_argument("-st", "--seed_threshold", required=False, default=0.31, type=float,
                     help="Seed threshold for Prediction") # 0.31 for simulation

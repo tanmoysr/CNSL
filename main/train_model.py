@@ -2,7 +2,6 @@
 import torch
 from torch.optim import Adam, SGD
 from torch.utils.data.sampler import SubsetRandomSampler
-from sklearn.preprocessing import StandardScaler
 from sklearn import preprocessing
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 import time
@@ -13,9 +12,7 @@ import numpy as np
 # Customized Libraries
 import loss_functions
 import models
-import gat
 import utilities as utils
-import scipy.sparse as sp
 from configuration import args
 
 # device = 'cpu'

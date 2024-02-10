@@ -2,21 +2,17 @@
 import torch
 from torch.optim import Adam, SGD
 from torch.utils.data.sampler import SubsetRandomSampler
-from sklearn.preprocessing import StandardScaler
 from sklearn import preprocessing
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 import time
 import pickle
 import pandas as pd
 import numpy as np
-import torch.nn as nn
 
 # Customized Libraries
 import loss_functions
 import models
-import gat
 import utilities as utils
-import scipy.sparse as sp
 from configuration import args
 
 # device = 'cpu'
@@ -31,6 +27,8 @@ dataset_file = '{}{}{}2{}_{}_{}.SG'.format(args.data_loc, args.dataset, args.dif
                                     args.diffusion_model_rec, str(10*args.seed_rate), args.sample)
 epoch_log_file = args.model_loc + 'inference_log_' + args.dataset + '_' + args.diffusion_model_proj + '2' + args.diffusion_model_rec + str(
     10 * args.seed_rate) + '.csv'
+epoch_pred_file = args.model_loc + 'pred_' + args.dataset + '_' + args.diffusion_model_proj + '2' + args.diffusion_model_rec + str(
+    10 * args.seed_rate) + '.pk'
 # VAE
 feature_representer_chk_file = args.model_loc + 'feature_representer_train_' + args.dataset + '_' + args.diffusion_model_proj + '2' + args.diffusion_model_rec + str(
     10 * args.seed_rate) + '.ckpt'
@@ -78,14 +76,14 @@ seed_name_received = receipient_nodes[inf_proj_idx]
 static_features_std = torch.from_numpy(preprocessing.normalize(static_features_pre))
 
 #%% Splitting data
-batch_size = args.batchSizeInfer
+# batch_size = args.batchSizeInfer
 random_seed = 42
 if inverse_pairs.shape[0] == inverse_pairs_rec.shape[0]:
     indices = list(range(inverse_pairs.shape[0]))
     np.random.seed(random_seed)
     np.random.shuffle(indices)
-    # train_indices, test_indices = indices[:len(inverse_pairs)-batch_size], indices[batch_size:]
     train_indices, test_indices = indices[:int(.8*len(indices))], indices[int(.8*len(indices)):]
+    batch_size = len(test_indices)
     train_sampler = SubsetRandomSampler(train_indices)
     test_sampler = SubsetRandomSampler(test_indices)
     train_set = torch.utils.data.DataLoader(inverse_pairs, batch_size=batch_size,
@@ -176,6 +174,7 @@ forward_model_rec.eval()
 
 #%% Inference Initialization
 print("Inference Initialization Started ...")
+initialization_tic = time.perf_counter()
 train_merge = torch.tensor(np.vstack(np.array([t.numpy() for t in list(np.array(list(enumerate(train_set)))[:,1])])))
 train_x = train_merge[:, :, 0].float().to(device)
 train_y = train_merge[:, :, 1].float().to(device)
@@ -207,19 +206,20 @@ with torch.no_grad():
     x_hat = f_z_bar.repeat(batch_size, 1, 1).to(device)
 
 x_hat.requires_grad = True
-
+initialization_time = time.perf_counter() - initialization_tic
 #%% Final Inference
 print("Final Inference Started ...")
 optimizer_input = Adam([x_hat], lr=args.lr_Infer, weight_decay=args.wd_Infer)
 
 sample_number = len(test_indices)
 
-epoch_dict = {'loss': [], 'forward_loss': [],
-                  'seed accuracy': [], 'seed precision': [], 'seed precision k': [], 'seed recall': [],
-                'seed_f1': [], 'seed_auc': [], 'auc_proj': [], 'auc_rec': [], 'time': []}
+epoch_dict = {'loss': [0], 'forward_loss': [0],
+                  'seed accuracy': [0], 'seed precision': [0], 'seed precision k': [0], 'seed recall': [0],
+                'seed_f1': [0], 'seed_auc': [0], 'auc_proj': [0], 'auc_rec': [0], 'time': [initialization_time]}
+epoch_pred_list = []
 for epoch in range(args.numEpochInfer):
-
-    epoch_tic = time.perf_counter()
+    # Log initialization
+    epoch_time = 0
     loss_overall = 0
     forward_overall = 0
     seed_accuracy_all = 0
@@ -230,11 +230,18 @@ for epoch in range(args.numEpochInfer):
     seed_auc_all = 0
     auc_all_proj = 0
     auc_all_rec = 0
+    pred_batch_dict = {'x': [],
+                       'x_hat': [],
+                       'threshold': []}
+
+    epoch_tic = time.perf_counter()
 
     optimizer_input.zero_grad()
 
     dataloader_iterator = iter(test_set_rec)
+    # updating_threshold = 0
     for batch_idx, data_pair in enumerate(test_set):
+        # print(batch_idx)
         try:
             data_pair_rec = next(dataloader_iterator)
         except StopIteration:
@@ -267,7 +274,22 @@ for epoch in range(args.numEpochInfer):
         loss.backward()
         optimizer_input.step()
 
+        epoch_time += time.perf_counter() - epoch_tic
+
         ## Performance
+        seed_precision_k_batch = 0
+        for dict_idx in range(x.shape[0]):
+            sample_x = x[dict_idx].squeeze().cpu().detach().numpy().flatten()
+            sample_x_hat = x_hat[dict_idx].squeeze().cpu().detach().numpy().flatten()
+
+            seed_precision_k_batch += utils.precision_at_k_score(sample_x.astype(int), sample_x_hat)
+
+            pred_batch_dict['x'].append(sample_x)
+            pred_batch_dict['x_hat'].append(sample_x_hat)
+            pred_batch_dict['threshold'].append(args.seed_threshold)
+
+        seed_precision_k_all += seed_precision_k_batch / (dict_idx + 1)
+
         x_pred = x_hat.cpu().detach()
         x_pred[x_pred > args.seed_threshold] = 1
         x_pred[x_pred != 1] = 0
@@ -276,9 +298,10 @@ for epoch in range(args.numEpochInfer):
         seed_hat = x_hat.squeeze().cpu().detach().numpy().flatten()
         seed_predicted = x_pred.squeeze().cpu().detach().numpy().flatten()
 
+        # updating_threshold+= utils.find_bestThreshold(seed_original, seed_hat)
+
         seed_accuracy_all += accuracy_score(seed_original.astype(int), seed_predicted.astype(int))
         seed_precision_all += precision_score(seed_original.astype(int), seed_predicted.astype(int), zero_division=0)
-        seed_precision_k_all +=utils.precision_at_k_score(seed_original.astype(int), seed_hat)
         seed_recall_all += recall_score(seed_original.astype(int), seed_predicted.astype(int), zero_division=0)
         seed_f1_all += f1_score(seed_original.astype(int), seed_predicted.astype(int))
         seed_auc_all += roc_auc_score(seed_original, seed_hat)
@@ -291,9 +314,9 @@ for epoch in range(args.numEpochInfer):
         infected_predicted_rec = y_hat_rec.squeeze().cpu().detach().numpy().flatten()
         auc_all_rec += roc_auc_score(infected_original_rec, infected_predicted_rec)
 
-
-    epoch_toc = time.perf_counter()
-    epoch_time = epoch_toc - epoch_tic
+    # args.seed_threshold = updating_threshold// (batch_idx + 1)
+    args.seed_threshold = utils.find_bestThreshold(seed_original, seed_hat)
+    epoch_pred_list.append(pred_batch_dict)
     epoch_dict['loss'].append(loss_overall / (batch_idx + 1))
     epoch_dict['forward_loss'].append(forward_overall / (batch_idx + 1))
     epoch_dict['seed accuracy'].append(seed_accuracy_all / (batch_idx + 1))
@@ -318,6 +341,10 @@ for epoch in range(args.numEpochInfer):
           "\tAUC Rec: {:.4f}".format(auc_all_rec / (batch_idx + 1)),
           "\tTime Taken: {:.6f}".format(epoch_time)
           )
+
 epoch_df = pd.DataFrame.from_dict(epoch_dict)
 epoch_df.index = epoch_df.index.rename('epochs')
 epoch_df.to_csv(epoch_log_file)
+
+with open(epoch_pred_file, 'wb') as f:
+    pickle.dump(epoch_pred_list, f)

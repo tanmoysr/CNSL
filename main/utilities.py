@@ -3,15 +3,9 @@ import torch
 import numpy as np
 import scipy.sparse as sp
 import pandas as pd
-import math
-import copy
-import torch.nn as nn
-import torch.nn.functional as F
 import networkx as nx
 import ndlib.models.ModelConfig as mc
 import ndlib.models.epidemics as ep
-import random
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_curve
 
 def sparse_mx_to_torch_sparse_tensor(sparse_mx):
