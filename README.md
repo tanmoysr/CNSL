@@ -35,3 +35,8 @@ If you want to change the configuration, you can do it in the file [configuratio
 * For example to change the number of epochs for inference:
 
 `python run_inference.py -eInfer 100`
+
+## Citation
+If you use the data or the model of this work, please cite the following:
+
+Ling, Chen, Tanmoy Chowdhury, Jie Ji, Sirui Li, Andreas Züfle, and Liang Zhao. "Source Localization for Cross Network Information Diffusion." arXiv preprint arXiv:2404.14668 (2024).
